@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>نظام مقارنة الفواتير</title>
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#0a0e1a">
+    <meta name="description" content="نظام ذكي لمقارنة الفواتير وحساب الأقاليم">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="الفواتير">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@200;400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0e1a; --bg-card: #121a2e; --fg: #f0f4f8; --muted: #6b7a90;
+            --accent: #f59e0b; --success: #10b981; --danger: #ef4444; --border: #1e2a3a;
+            --company: #0ea5e9; --personal: #a855f7;
+        }
+        * { font-family: 'Tajawal', sans-serif; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { background: var(--bg); color: var(--fg); min-height: 100vh; min-height: 100dvh; background-image: radial-gradient(ellipse at 20% 0%, rgba(14, 165, 233, 0.08) 0%, transparent 50%), radial-gradient(ellipse at 80% 100%, rgba(168, 85, 247, 0.08) 0%, transparent 50%); }
+        
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; position: relative; overflow: hidden; }
+        .card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; }
+        .card-company::before { background: linear-gradient(90deg, var(--company), var(--accent)); }
+        .card-personal::before { background: linear-gradient(90deg, var(--personal), var(--accent)); }
+        
+        .input-field { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 6px; padding: 8px; color: var(--fg); width: 100%; font-size: 13px; transition: border 0.2s; }
+        .input-field:focus { outline: none; border-color: var(--accent); }
+        
+        .btn { padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 12px; border: none; display: inline-flex; align-items: center; gap: 4px; transition: all 0.2s; }
+        .btn-primary { background: linear-gradient(135deg, var(--accent), #d97706); color: #000; }
+        .btn-danger { background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.3); padding: 4px 8px; font-size: 11px; }
+        .btn-secondary { background: rgba(255,255,255,0.05); border: 1px solid var(--border); color: var(--fg); }
+        .btn-success { background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); }
+        
+        .upload-zone { border: 2px dashed var(--border); border-radius: 8px; padding: 10px; text-align: center; cursor: pointer; transition: all 0.3s; }
+        .upload-zone:hover { border-color: var(--accent); background: rgba(245, 158, 11, 0.05); }
+        
+        .status-box { padding: 6px 10px; border-radius: 6px; font-size: 11px; margin-top: 6px; display: flex; align-items: center; gap: 6px; }
+        .status-loading { background: rgba(245, 158, 11, 0.1); color: var(--accent); }
+        .status-success { background: rgba(16, 185, 129, 0.1); color: var(--success); }
+        
+        .spinner { width: 12px; height: 12px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
+
+        .comparison-section { background: rgba(255,255,255,0.01); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; overflow: hidden; }
+        .comparison-header { padding: 10px 12px; background: rgba(20,29,47,0.8); border-bottom: 1px solid var(--border); cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .comparison-header .chevron { transition: transform 0.3s ease; }
+        .comparison-section.collapsed .comparison-header .chevron { transform: rotate(-90deg); }
+        .comparison-content { padding: 12px; transition: all 0.3s ease; max-height: 5000px; opacity: 1; overflow: hidden; }
+        .comparison-section.collapsed .comparison-content { max-height: 0; padding: 0 12px; opacity: 0; pointer-events: none; }
+        
+        .diff-box { padding: 8px; border-radius: 6px; text-align: center; background: rgba(0,0,0,0.2); }
+        .fade-in { animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .toast-container { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 9999; width: 90%; max-width: 300px; }
+        .toast { padding: 10px 16px; border-radius: 8px; font-size: 13px; animation: toastIn 0.3s ease, toastOut 0.3s ease 2.7s forwards; box-shadow: 0 5px 15px rgba(0,0,0,0.4); text-align: center; }
+        .toast-success { background: linear-gradient(135deg, #10b981, #059669); color: white; }
+        .toast-error { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
+        @keyframes toastIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes toastOut { from { opacity: 1; } to { opacity: 0; } }
+
+        .history-panel { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); backdrop-filter: blur(10px); z-index: 1000; display: flex; opacity: 0; visibility: hidden; transition: all 0.3s ease; }
+        .history-panel.open { opacity: 1; visibility: visible; }
+        .history-content { width: 100%; height: 100%; overflow-y: auto; padding: 20px; }
+        .history-container { max-width: 900px; margin: 0 auto; }
+        
+        .clear-card-btn { position: absolute; top: 6px; left: 6px; width: 22px; height: 22px; border-radius: 4px; background: rgba(239, 68, 68, 0.1); color: var(--danger); cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.2s; z-index: 10; font-size: 11px; border: none; }
+        .card:hover .clear-card-btn { opacity: 1; }
+
+        .code-chip { display: inline-block; padding: 2px 6px; margin: 1px; border-radius: 4px; font-family: monospace; font-size: 10px; }
+        .code-missing-in-personal { background: rgba(14, 165, 233, 0.2); color: var(--company); }
+        .code-missing-in-company { background: rgba(168, 85, 247, 0.2); color: var(--personal); }
+        
+        .codes-result-box { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 10px; margin-top: 10px; border: 1px solid var(--border); }
+        .codes-column { max-height: 150px; overflow-y: auto; padding: 6px; background: rgba(0,0,0,0.2); border-radius: 6px; }
+        .codes-textarea { font-family: monospace; font-size: 10px; line-height: 1.3; min-height: 60px; }
+
+        .tag { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 9px; font-weight: bold; }
+        .tag-company { background: rgba(14, 165, 233, 0.15); color: var(--company); }
+        .tag-personal { background: rgba(168, 85, 247, 0.15); color: var(--personal); }
+        .source-btn { flex: 1; padding: 6px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; transition: all 0.2s; font-size: 11px; }
+        .active-company { background: rgba(14, 165, 233, 0.15); border-color: var(--company); color: var(--company); }
+        .active-personal { background: rgba(168, 85, 247, 0.15); border-color: var(--personal); color: var(--personal); }
+
+        .zones-section { background: rgba(0,0,0,0.15); border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-top: 6px; }
+        .zone-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+        .zone-input-group { display: flex; flex-direction: column; gap: 2px; }
+        .zone-input-group label { font-size: 10px; color: var(--muted); }
+        .calc-info { font-size: 10px; color: var(--muted); text-align: center; padding: 4px; background: rgba(0,0,0,0.1); border-radius: 4px; margin-top: 4px; }
+
+        .summary-box { background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 10px; }
+        .summary-title { font-size: 13px; font-weight: bold; margin-bottom: 10px; }
+        .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+        @media (max-width: 640px) { .summary-grid { grid-template-columns: repeat(2, 1fr); } }
+        .summary-item { background: rgba(0,0,0,0.2); border-radius: 6px; padding: 10px; text-align: center; }
+        .summary-item .label { font-size: 10px; color: var(--muted); }
+        .summary-item .value { font-size: 16px; font-weight: bold; }
+        .summary-item .sub { font-size: 9px; color: var(--danger); margin-top: 2px; }
+        .summary-item .info { font-size: 9px; color: var(--muted); margin-top: 2px; }
+        
+        .invoice-summary { background: linear-gradient(135deg, rgba(0,0,0,0.3), rgba(0,0,0,0.1)); border-radius: 8px; padding: 10px; margin-top: 8px; border: 1px solid var(--border); }
+        .invoice-summary-title { font-size: 11px; font-weight: bold; margin-bottom: 8px; }
+        .invoice-summary-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+        .invoice-summary-item { background: rgba(0,0,0,0.2); border-radius: 4px; padding: 6px; text-align: center; }
+        .invoice-summary-item .l { font-size: 9px; color: var(--muted); }
+        .invoice-summary-item .v { font-size: 13px; font-weight: bold; }
+
+        .history-detail-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+        .history-invoice-card { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 10px; }
+
+        .main-summary-card { background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05)); border: 1px solid rgba(16, 185, 129, 0.3); }
+        .net-highlight { background: linear-gradient(135deg, rgba(14, 165, 233, 0.15), rgba(14, 165, 233, 0.05)); border: 1px solid rgba(14, 165, 233, 0.3); }
+        .net-highlight-purple { background: linear-gradient(135deg, rgba(168, 85, 247, 0.15), rgba(168, 85, 247, 0.05)); border: 1px solid rgba(168, 85, 247, 0.3); }
+
+        /* PWA Install Button */
+        .pwa-install-btn {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, var(--accent), #d97706);
+            color: #000;
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-weight: bold;
+            font-family: 'Tajawal', sans-serif;
+            box-shadow: 0 4px 20px rgba(245, 158, 11, 0.4);
+            z-index: 9998;
+            display: none;
+            animation: bounceBtn 2s infinite;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        @keyframes bounceBtn {
+            0%, 20%, 50%, 80%, 100% { transform: translateX(-50%) translateY(0); }
+            40% { transform: translateX(-50%) translateY(-8px); }
+            60% { transform: translateX(-50%) translateY(-4px); }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 2px; }
+
+        /* Safe Area */
+        @supports (padding: max(0px)) {
+            body { padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+        }
+    </style>
+</head>
+<body class="p-2 md:p-4">
+    <div id="toastContainer" class="toast-container"></div>
+    
+    <!-- PWA Install Button -->
+    <button id="pwaInstallBtn" class="pwa-install-btn">📲 تثبيت التطبيق</button>
+
+    <div id="historyPanel" class="history-panel">
+        <div class="history-content">
+            <div class="history-container">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold text-amber-400 flex items-center gap-2">
+                        <span id="historyTitle">📚 السجل المحفوظ</span>
+                    </h2>
+                    <button onclick="closeHistoryPanel()" class="btn btn-secondary">✕ إغلاق</button>
+                </div>
+                <div id="historyContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="mainApp" class="max-w-7xl mx-auto">
+        <header class="text-center mb-4">
+            <h1 class="text-lg md:text-xl font-black mb-1 bg-gradient-to-l from-amber-400 to-orange-500 bg-clip-text text-transparent">
+                نظام مقارنة الفواتير
+            </h1>
+            <p class="text-gray-400 text-xs">استخراج ذكي + طلبيات الأقاليم + ملخص خاص لكل فاتورة</p>
+        </header>
+
+        <div class="flex flex-wrap gap-2 mb-3 justify-center">
+            <button onclick="openHistoryPanel()" class="btn btn-secondary text-xs">📚 السجل</button>
+            <button onclick="quickSave()" class="btn btn-success text-xs">💾 حفظ</button>
+            <button onclick="exportReport()" class="btn btn-secondary text-xs">📥 تصدير</button>
+            <button onclick="clearAllComparisons()" class="btn btn-danger text-xs">🗑️ الكل</button>
+        </div>
+
+        <div class="card main-summary-card p-3 mb-3">
+            <div class="flex justify-between items-center mb-3">
+                <h2 class="text-sm font-bold text-emerald-400">📊 الملخص العام</h2>
+            </div>
+            
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-center mb-2">
+                <div class="diff-box border border-cyan-500/10">
+                    <div class="text-xs text-gray-500">🏢 شركة (إجمالي)</div>
+                    <div id="sumCompany" class="text-base font-bold text-sky-400">0.00</div>
+                    <div class="text-xs text-gray-500"><span id="sumCompanyOrders">0</span> طلبية</div>
+                </div>
+                <div class="diff-box border border-purple-500/10">
+                    <div class="text-xs text-gray-500">👤 شخصي (إجمالي)</div>
+                    <div id="sumPersonal" class="text-base font-bold text-purple-400">0.00</div>
+                    <div class="text-xs text-gray-500"><span id="sumPersonalOrders">0</span> طلبية</div>
+                </div>
+                <div class="net-highlight rounded-lg p-2">
+                    <div class="text-xs text-gray-400">🏢 شركة (صافي)</div>
+                    <div id="sumCompanyNet" class="text-base font-bold text-sky-400">0.00</div>
+                    <div class="text-xs text-red-400">بعد الخصم</div>
+                </div>
+                <div class="net-highlight-purple rounded-lg p-2">
+                    <div class="text-xs text-gray-400">👤 شخصي (صافي)</div>
+                    <div id="sumPersonalNet" class="text-base font-bold text-purple-400">0.00</div>
+                    <div class="text-xs text-red-400">بعد الخصم</div>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-center mb-2">
+                <div class="diff-box border border-amber-500/10">
+                    <div class="text-xs text-gray-500">فرق إجمالي</div>
+                    <div id="sumGrossDiff" class="text-base font-bold text-amber-400">0.00</div>
+                </div>
+                <div class="diff-box border border-emerald-500/10">
+                    <div class="text-xs text-gray-500">فرق صافي</div>
+                    <div id="sumNetDiff" class="text-base font-bold text-emerald-400">0.00</div>
+                </div>
+                <div class="bg-red-500/5 rounded-lg p-2 text-center border border-red-500/10">
+                    <div class="text-xs text-gray-400">خصم الشركة</div>
+                    <div id="sumCompanyDed" class="text-sm font-bold text-red-400">-0.00</div>
+                </div>
+                <div class="bg-red-500/5 rounded-lg p-2 text-center border border-red-500/10">
+                    <div class="text-xs text-gray-400">خصم الشخصي</div>
+                    <div id="sumPersonalDed" class="text-sm font-bold text-red-400">-0.00</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+                <div class="bg-sky-500/5 rounded-lg p-2 text-center border border-sky-500/10">
+                    <div class="text-xs text-gray-400">CRBT شركة</div>
+                    <div id="sumCompanyCrbt" class="text-sm font-bold text-sky-400">0.00</div>
+                </div>
+                <div class="bg-purple-500/5 rounded-lg p-2 text-center border border-purple-500/10">
+                    <div class="text-xs text-gray-400">CRBT شخصي</div>
+                    <div id="sumPersonalCrbt" class="text-sm font-bold text-purple-400">0.00</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="comparisonsContainer"></div>
+        
+        <div class="mt-3">
+            <button onclick="addComparison()" class="btn btn-primary w-full text-xs">➕ إضافة مقارنة</button>
+        </div>
+    </div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        let comparisons = [];
+        let idCounter = 0;
+        const STORAGE_KEY = 'invoice_comparisons_v19_pwa';
+        const HISTORY_KEY = 'invoice_history_v19_pwa';
+
+        const defaultZones = () => ({ local: { count: 0, price: 0 }, regional: { count: 0, price: 0 }, south: { count: 0, price: 0 } });
+
+        document.addEventListener('DOMContentLoaded', () => { loadFromStorage(); if (comparisons.length === 0) addComparison(); });
+
+        const showToast = (message, type = 'success') => { const c = document.getElementById('toastContainer'); const t = document.createElement('div'); t.className = `toast toast-${type}`; t.textContent = message; c.appendChild(t); setTimeout(() => t.remove(), 3000); };
+        const escapeHtml = (text) => { if (!text) return ''; const d = document.createElement('div'); d.textContent = text; return d.innerHTML; };
+        const parseNumber = (str) => { if (!str) return 0; return parseFloat(str.toString().trim().replace(/\s/g, '').replace(/,/g, '.').replace(/[^\d.]/g, '')) || 0; };
+        const normalizeArabicNumbers = (text) => text.replace(/[٠-٩]/g, char => ({'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'}[char] || char));
+        
+        const calcDeduction = (zones) => (zones.local.count * zones.local.price) + (zones.regional.count * zones.regional.price) + (zones.south.count * zones.south.price);
+        const calcNet = (amount, zones) => amount - calcDeduction(zones);
+        const calcRemainingOrders = (orders, zones) => orders - (zones.local.count + zones.regional.count + zones.south.count);
+        const calcZoneOrders = (zones) => zones.local.count + zones.regional.count + zones.south.count;
+
+        function saveToStorage() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(comparisons)); localStorage.setItem('invoice_id_counter', idCounter.toString()); } catch (e) {} }
+        function loadFromStorage() { try { const s = localStorage.getItem(STORAGE_KEY); const c = localStorage.getItem('invoice_id_counter'); if (s) { comparisons = JSON.parse(s); comparisons.forEach(x => { x.collapsed = x.collapsed || false; x.company.codes = x.company.codes || []; x.personal.codes = x.personal.codes || []; x.reasons = x.reasons || []; x.company.zones = x.company.zones || defaultZones(); x.personal.zones = x.personal.zones || defaultZones(); }); } if (c) idCounter = parseInt(c) || 0; render(); } catch (e) { addComparison(); } }
+
+        const openHistoryPanel = () => { document.getElementById('historyPanel').classList.add('open'); document.getElementById('historyTitle').textContent = '📚 السجل المحفوظ'; renderHistoryList(); };
+        const closeHistoryPanel = () => { document.getElementById('historyPanel').classList.remove('open'); };
+        const getHistory = () => { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; } };
+        
+        function renderHistoryList() {
+            const h = getHistory();
+            const container = document.getElementById('historyContent');
+            if (h.length === 0) { container.innerHTML = '<div class="text-center text-gray-500 py-12"><div class="text-4xl mb-2">📭</div><div>السجل فارغ</div></div><div class="mt-4"><button onclick="saveToHistoryPrompt()" class="btn btn-primary w-full">💾 حفظ الحالي</button></div>'; return; }
+            container.innerHTML = `<div class="space-y-2 mb-4">${h.map((i, x) => `<div class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex justify-between items-center cursor-pointer hover:bg-slate-700/30" onclick="viewHistoryDetail(${x})"><div><div class="font-bold text-amber-400 text-sm">${escapeHtml(i.name)}</div><div class="text-xs text-gray-500">${new Date(i.date).toLocaleString('ar-DZ')}</div><div class="text-xs text-gray-400 mt-1">${i.data?.length || 0} مقارنة</div></div><div class="flex gap-2 items-center"><button class="btn btn-secondary text-xs py-1 px-2" onclick="event.stopPropagation(); viewHistoryDetail(${x})">👁️ عرض</button><button class="btn btn-success text-xs py-1 px-2" onclick="event.stopPropagation(); loadFromHistory(${x})">↻</button><button class="btn btn-danger text-xs py-1 px-2" onclick="event.stopPropagation(); deleteFromHistory(${x})">🗑️</button></div></div>`).join('')}</div><div class="mt-4"><button onclick="saveToHistoryPrompt()" class="btn btn-primary w-full">💾 حفظ الحالي</button></div>`;
+        }
+        
+        function viewHistoryDetail(idx) {
+            const h = getHistory(); if (!h[idx]) return; const record = h[idx]; const comps = record.data;
+            let sumC = 0, sumP = 0, sumCDed = 0, sumPDed = 0, sumCOrders = 0, sumPOrders = 0, sumCNet = 0, sumPNet = 0, sumCCrbt = 0, sumPCrbt = 0;
+            comps.forEach(c => { sumC += c.company.amount || 0; sumP += c.personal.amount || 0; sumCDed += calcDeduction(c.company.zones); sumPDed += calcDeduction(c.personal.zones); sumCOrders += c.company.orders || 0; sumPOrders += c.personal.orders || 0; sumCNet += calcNet(c.company.amount, c.company.zones); sumPNet += calcNet(c.personal.amount, c.personal.zones); sumCCrbt += c.company.crbt || 0; sumPCrbt += c.personal.crbt || 0; });
+            document.getElementById('historyTitle').innerHTML = `📋 ${escapeHtml(record.name)}`;
+            document.getElementById('historyContent').innerHTML = `<button onclick="renderHistoryList()" class="btn btn-secondary text-xs mb-4">← العودة للقائمة</button><div class="bg-slate-800/30 rounded-lg p-3 mb-4 border border-slate-700"><div class="flex justify-between"><div><div class="text-xs text-gray-400">تاريخ الحفظ</div><div class="font-bold text-amber-400">${new Date(record.date).toLocaleString('ar-DZ')}</div></div><div class="text-left"><div class="text-xs text-gray-400">عدد المقارنات</div><div class="font-bold text-cyan-400">${comps.length}</div></div></div></div><div class="card main-summary-card p-3 mb-4"><h3 class="text-sm font-bold text-emerald-400 mb-2">📊 الملخص العام للسجل</h3><div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-center mb-2"><div class="diff-box border border-cyan-500/10"><div class="text-xs text-gray-500">🏢 شركة (إجمالي)</div><div class="text-base font-bold text-sky-400">${sumC.toFixed(2)}</div><div class="text-xs text-gray-500">${sumCOrders} طلبية</div></div><div class="diff-box border border-purple-500/10"><div class="text-xs text-gray-500">👤 شخصي (إجمالي)</div><div class="text-base font-bold text-purple-400">${sumP.toFixed(2)}</div><div class="text-xs text-gray-500">${sumPOrders} طلبية</div></div><div class="net-highlight rounded-lg p-2"><div class="text-xs text-gray-400">🏢 شركة (صافي)</div><div class="text-base font-bold text-sky-400">${sumCNet.toFixed(2)}</div></div><div class="net-highlight-purple rounded-lg p-2"><div class="text-xs text-gray-400">👤 شخصي (صافي)</div><div class="text-base font-bold text-purple-400">${sumPNet.toFixed(2)}</div></div></div><div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-center"><div class="diff-box border border-amber-500/10"><div class="text-xs text-gray-500">فرق إجمالي</div><div class="text-base font-bold ${(sumC - sumP) >= 0 ? 'text-emerald-400' : 'text-red-400'}">${(sumC - sumP).toFixed(2)}</div></div><div class="diff-box border border-emerald-500/10"><div class="text-xs text-gray-500">فرق صافي</div><div class="text-base font-bold ${(sumCNet - sumPNet) >= 0 ? 'text-emerald-400' : 'text-red-400'}">${(sumCNet - sumPNet).toFixed(2)}</div></div><div class="bg-red-500/5 rounded p-2 text-center border border-red-500/10"><div class="text-xs text-gray-400">خصم الشركة</div><div class="text-sm font-bold text-red-400">-${sumCDed.toFixed(2)}</div></div><div class="bg-red-500/5 rounded p-2 text-center border border-red-500/10"><div class="text-xs text-gray-400">خصم الشخصي</div><div class="text-sm font-bold text-red-400">-${sumPDed.toFixed(2)}</div></div></div></div><div class="mt-4"><button onclick="loadFromHistory(${idx})" class="btn btn-success w-full">↻ استرجاع هذا السجل</button></div>`;
+        }
+        
+        function saveToHistoryPrompt() { const n = prompt('اسم الحفظة:', `حفظ ${new Date().toLocaleDateString('ar-DZ')}`); if (!n) return; const h = getHistory(); h.unshift({ name: n, date: new Date().toISOString(), data: JSON.parse(JSON.stringify(comparisons)), idCounter }); if (h.length > 20) h.pop(); localStorage.setItem(HISTORY_KEY, JSON.stringify(h)); showToast('✓ تم الحفظ'); renderHistoryList(); }
+        function loadFromHistory(idx) { const h = getHistory(); if (!h[idx]) return; if (!confirm('استبدال البيانات الحالية؟')) return; comparisons = JSON.parse(JSON.stringify(h[idx].data)); idCounter = h[idx].idCounter || comparisons.length; saveToStorage(); render(); closeHistoryPanel(); showToast('✓ تم الاسترجاع'); }
+        function deleteFromHistory(idx) { if (!confirm('حذف؟')) return; const h = getHistory(); h.splice(idx, 1); localStorage.setItem(HISTORY_KEY, JSON.stringify(h)); renderHistoryList(); }
+        const quickSave = () => { saveToStorage(); showToast('✓ حفظ سريع'); };
+
+        function addComparison() { idCounter++; comparisons.push({ id: idCounter, collapsed: false, company: { amount: 0, orders: 0, crbt: 0, zones: defaultZones(), codes: [] }, personal: { amount: 0, orders: 0, crbt: 0, zones: defaultZones(), codes: [] }, reasons: [], tempSource: null }); render(); saveToStorage(); }
+        function removeComparison(id) { if(comparisons.length <= 1) { showToast('⚠️ الأخيرة', 'error'); return; } if(confirm('حذف؟')) { comparisons = comparisons.filter(c => c.id !== id); render(); calcTotals(); saveToStorage(); } }
+        function toggleComparison(id) { const c = comparisons.find(c => c.id === id); if (c) { c.collapsed = !c.collapsed; document.getElementById(`comp-section-${id}`).classList.toggle('collapsed', c.collapsed); } }
+        function clearInvoiceValues(id, type) { const c = comparisons.find(c => c.id === id); if (!c) return; c[type] = { amount: 0, orders: 0, crbt: 0, zones: defaultZones(), codes: [] }; render(); updateCompDisplay(id); saveToStorage(); showToast('✓ مسح'); }
+        function clearComparison(id) { if(!confirm('مسح القيم؟')) return; const c = comparisons.find(c => c.id === id); if (!c) return; c.company = { amount: 0, orders: 0, crbt: 0, zones: defaultZones(), codes: [] }; c.personal = { amount: 0, orders: 0, crbt: 0, zones: defaultZones(), codes: [] }; c.reasons = []; render(); updateCompDisplay(id); saveToStorage(); }
+        function clearAllComparisons() { if(!confirm('مسح الكل؟')) return; comparisons = [{ id: ++idCounter, company: { amount: 0, orders: 0, crbt: 0, zones: defaultZones(), codes: [] }, personal: { amount: 0, orders: 0, crbt: 0, zones: defaultZones(), codes: [] }, reasons: [], collapsed: false }]; render(); calcTotals(); saveToStorage(); }
+
+        function render() {
+            const container = document.getElementById('comparisonsContainer');
+            container.innerHTML = comparisons.map(c => `
+                <div class="comparison-section ${c.collapsed ? 'collapsed' : ''} fade-in" id="comp-section-${c.id}">
+                    <div class="comparison-header" onclick="toggleComparison(${c.id})">
+                        <div class="flex items-center gap-2">
+                            <span class="chevron text-amber-400"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></span>
+                            <h3 class="font-bold text-sm">مقارنة #${c.id}</h3>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <button class="btn btn-secondary text-xs py-1 px-2" onclick="event.stopPropagation(); clearComparison(${c.id})">🧹</button>
+                            <button class="btn btn-danger text-xs py-1 px-2" onclick="event.stopPropagation(); removeComparison(${c.id})">🗑️</button>
+                        </div>
+                    </div>
+                    
+                    <div class="comparison-content">
+                        <div class="grid-2">
+                            <div class="card card-company p-3 relative">
+                                <button class="clear-card-btn" onclick="clearInvoiceValues(${c.id}, 'company')">🗑️</button>
+                                <h4 class="font-bold mb-2 text-sky-400 text-sm">🏢 الشركة</h4>
+                                <label class="upload-zone block mb-2"><input type="file" accept=".pdf,.jpg,.jpeg,.png" class="hidden" onchange="handleUpload(${c.id}, 'company', this)"><div class="text-sky-400 text-xs">📁 رفع PDF/صورة</div></label>
+                                <div id="company-status-${c.id}"></div>
+                                
+                                <div class="space-y-2">
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <div><label class="text-xs text-gray-400">💵 المبلغ الإجمالي</label><input type="number" step="0.01" class="input-field" id="c-amount-${c.id}" value="${c.company.amount || ''}" oninput="updateData(${c.id}, 'company', 'amount', this.value)"></div>
+                                        <div><label class="text-xs text-gray-400">💎 CRBT</label><input type="number" step="0.01" class="input-field" id="c-crbt-${c.id}" value="${c.company.crbt || ''}" oninput="updateData(${c.id}, 'company', 'crbt', this.value)"></div>
+                                    </div>
+                                    <div>
+                                        <label class="text-xs text-gray-400">📦 عدد الطلبيات</label>
+                                        <input type="number" class="input-field" id="c-orders-${c.id}" value="${c.company.orders || ''}" oninput="updateData(${c.id}, 'company', 'orders', this.value)">
+                                    </div>
+
+                                    <div class="zones-section">
+                                        <div class="text-xs font-bold text-amber-400 mb-2">🌍 طلبيات الأقاليم (للخصم)</div>
+                                        <div class="zone-grid">
+                                            <div class="zone-input-group"><label>المركز</label><input type="number" class="input-field text-xs" placeholder="عدد" value="${c.company.zones.local.count || ''}" oninput="updateZone(${c.id}, 'company', 'local', 'count', this.value)"><input type="number" class="input-field text-xs mt-1" placeholder="سعر" value="${c.company.zones.local.price || ''}" oninput="updateZone(${c.id}, 'company', 'local', 'price', this.value)"></div>
+                                            <div class="zone-input-group"><label>الأقاليم</label><input type="number" class="input-field text-xs" placeholder="عدد" value="${c.company.zones.regional.count || ''}" oninput="updateZone(${c.id}, 'company', 'regional', 'count', this.value)"><input type="number" class="input-field text-xs mt-1" placeholder="سعر" value="${c.company.zones.regional.price || ''}" oninput="updateZone(${c.id}, 'company', 'regional', 'price', this.value)"></div>
+                                            <div class="zone-input-group"><label>الجنوب</label><input type="number" class="input-field text-xs" placeholder="عدد" value="${c.company.zones.south.count || ''}" oninput="updateZone(${c.id}, 'company', 'south', 'count', this.value)"><input type="number" class="input-field text-xs mt-1" placeholder="سعر" value="${c.company.zones.south.price || ''}" oninput="updateZone(${c.id}, 'company', 'south', 'price', this.value)"></div>
+                                        </div>
+                                        <div class="calc-info">خصم: <span id="c-ded-${c.id}" class="font-bold text-red-400">0.00</span> | طلبيات مخصومة: <span id="c-zone-ord-${c.id}" class="font-bold text-amber-400">0</span></div>
+                                    </div>
+
+                                    <div class="bg-black/20 p-2 rounded"><label class="text-xs text-gray-400">🔢 الأكواد (${(c.company.codes || []).length})</label><textarea class="input-field codes-textarea mt-1" id="c-codes-${c.id}" oninput="updateCodes(${c.id}, 'company', this.value)">${(c.company.codes || []).join('\n')}</textarea></div>
+                                    
+                                    <div class="invoice-summary" style="border-color: rgba(14, 165, 233, 0.2);">
+                                        <div class="invoice-summary-title text-sky-400">📊 ملخص الفاتورة</div>
+                                        <div class="invoice-summary-grid">
+                                            <div class="invoice-summary-item"><div class="l">المبلغ الإجمالي</div><div class="v text-sky-400" id="c-sum-amount-${c.id}">0.00</div></div>
+                                            <div class="invoice-summary-item"><div class="l">CRBT</div><div class="v text-sky-400" id="c-sum-crbt-${c.id}">0.00</div></div>
+                                            <div class="invoice-summary-item"><div class="l">عدد الطلبيات</div><div class="v text-sky-400" id="c-sum-orders-${c.id}">0</div><div class="text-gray-500 text-[8px]" id="c-sum-rem-${c.id}">متبقية: 0</div></div>
+                                            <div class="invoice-summary-item"><div class="l">الخصم</div><div class="v text-red-400" id="c-sum-ded-${c.id}">-0.00</div></div>
+                                            <div class="invoice-summary-item col-span-2" style="background: rgba(14, 165, 233, 0.1);"><div class="l">الصافي</div><div class="v text-sky-400 text-lg" id="c-sum-net-${c.id}">0.00</div></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="card card-personal p-3 relative">
+                                <button class="clear-card-btn" onclick="clearInvoiceValues(${c.id}, 'personal')">🗑️</button>
+                                <h4 class="font-bold mb-2 text-purple-400 text-sm">👤 الشخصي</h4>
+                                <label class="upload-zone block mb-2"><input type="file" accept=".pdf,.jpg,.jpeg,.png" class="hidden" onchange="handleUpload(${c.id}, 'personal', this)"><div class="text-purple-400 text-xs">📁 رفع PDF/صورة</div></label>
+                                <div id="personal-status-${c.id}"></div>
+                                
+                                <div class="space-y-2">
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <div><label class="text-xs text-gray-400">💵 المبلغ الإجمالي</label><input type="number" step="0.01" class="input-field" id="p-amount-${c.id}" value="${c.personal.amount || ''}" oninput="updateData(${c.id}, 'personal', 'amount', this.value)"></div>
+                                        <div><label class="text-xs text-gray-400">💎 CRBT</label><input type="number" step="0.01" class="input-field" id="p-crbt-${c.id}" value="${c.personal.crbt || ''}" oninput="updateData(${c.id}, 'personal', 'crbt', this.value)"></div>
+                                    </div>
+                                    <div>
+                                        <label class="text-xs text-gray-400">📦 عدد الطلبيات</label>
+                                        <input type="number" class="input-field" id="p-orders-${c.id}" value="${c.personal.orders || ''}" oninput="updateData(${c.id}, 'personal', 'orders', this.value)">
+                                    </div>
+
+                                    <div class="zones-section">
+                                        <div class="text-xs font-bold text-amber-400 mb-2">🌍 طلبيات الأقاليم (للخصم)</div>
+                                        <div class="zone-grid">
+                                            <div class="zone-input-group"><label>المركز</label><input type="number" class="input-field text-xs" placeholder="عدد" value="${c.personal.zones.local.count || ''}" oninput="updateZone(${c.id}, 'personal', 'local', 'count', this.value)"><input type="number" class="input-field text-xs mt-1" placeholder="سعر" value="${c.personal.zones.local.price || ''}" oninput="updateZone(${c.id}, 'personal', 'local', 'price', this.value)"></div>
+                                            <div class="zone-input-group"><label>الأقاليم</label><input type="number" class="input-field text-xs" placeholder="عدد" value="${c.personal.zones.regional.count || ''}" oninput="updateZone(${c.id}, 'personal', 'regional', 'count', this.value)"><input type="number" class="input-field text-xs mt-1" placeholder="سعر" value="${c.personal.zones.regional.price || ''}" oninput="updateZone(${c.id}, 'personal', 'regional', 'price', this.value)"></div>
+                                            <div class="zone-input-group"><label>الجنوب</label><input type="number" class="input-field text-xs" placeholder="عدد" value="${c.personal.zones.south.count || ''}" oninput="updateZone(${c.id}, 'personal', 'south', 'count', this.value)"><input type="number" class="input-field text-xs mt-1" placeholder="سعر" value="${c.personal.zones.south.price || ''}" oninput="updateZone(${c.id}, 'personal', 'south', 'price', this.value)"></div>
+                                        </div>
+                                        <div class="calc-info">خصم: <span id="p-ded-${c.id}" class="font-bold text-red-400">0.00</span> | طلبيات مخصومة: <span id="p-zone-ord-${c.id}" class="font-bold text-amber-400">0</span></div>
+                                    </div>
+
+                                    <div class="bg-black/20 p-2 rounded"><label class="text-xs text-gray-400">🔢 الأكواد (${(c.personal.codes || []).length})</label><textarea class="input-field codes-textarea mt-1" id="p-codes-${c.id}" oninput="updateCodes(${c.id}, 'personal', this.value)">${(c.personal.codes || []).join('\n')}</textarea></div>
+                                    
+                                    <div class="invoice-summary" style="border-color: rgba(168, 85, 247, 0.2);">
+                                        <div class="invoice-summary-title text-purple-400">📊 ملخص الفاتورة</div>
+                                        <div class="invoice-summary-grid">
+                                            <div class="invoice-summary-item"><div class="l">المبلغ الإجمالي</div><div class="v text-purple-400" id="p-sum-amount-${c.id}">0.00</div></div>
+                                            <div class="invoice-summary-item"><div class="l">CRBT</div><div class="v text-purple-400" id="p-sum-crbt-${c.id}">0.00</div></div>
+                                            <div class="invoice-summary-item"><div class="l">عدد الطلبيات</div><div class="v text-purple-400" id="p-sum-orders-${c.id}">0</div><div class="text-gray-500 text-[8px]" id="p-sum-rem-${c.id}">متبقية: 0</div></div>
+                                            <div class="invoice-summary-item"><div class="l">الخصم</div><div class="v text-red-400" id="p-sum-ded-${c.id}">-0.00</div></div>
+                                            <div class="invoice-summary-item col-span-2" style="background: rgba(168, 85, 247, 0.1);"><div class="l">الصافي</div><div class="v text-purple-400 text-lg" id="p-sum-net-${c.id}">0.00</div></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="summary-box mt-3">
+                            <h4 class="summary-title text-amber-400">📊 ملخص هذه المقارنة</h4>
+                            <div class="summary-grid">
+                                <div class="summary-item" style="border: 1px solid rgba(14, 165, 233, 0.2);"><div class="label">شركة - إجمالي</div><div class="value text-sky-400" id="s-c-amount-${c.id}">0.00</div></div>
+                                <div class="summary-item" style="border: 1px solid rgba(168, 85, 247, 0.2);"><div class="label">شخصي - إجمالي</div><div class="value text-purple-400" id="s-p-amount-${c.id}">0.00</div></div>
+                                <div class="summary-item net-highlight"><div class="label">شركة - صافي</div><div class="value text-sky-400" id="s-c-net-${c.id}">0.00</div><div class="sub" id="s-c-ded-${c.id}">-0.00 خصم</div></div>
+                                <div class="summary-item net-highlight-purple"><div class="label">شخصي - صافي</div><div class="value text-purple-400" id="s-p-net-${c.id}">0.00</div><div class="sub" id="s-p-ded-${c.id}">-0.00 خصم</div></div>
+                            </div>
+                            <div class="summary-grid mt-2">
+                                <div class="summary-item"><div class="label">طلبيات الشركة</div><div class="value text-sky-400" id="s-c-orders-${c.id}">0</div><div class="info" id="s-c-rem-${c.id}">بعد الخصم: 0</div></div>
+                                <div class="summary-item"><div class="label">طلبيات الشخصي</div><div class="value text-purple-400" id="s-p-orders-${c.id}">0</div><div class="info" id="s-p-rem-${c.id}">بعد الخصم: 0</div></div>
+                                <div class="summary-item" style="border: 1px solid rgba(14, 165, 233, 0.2);"><div class="label">CRBT الشركة</div><div class="value text-sky-400" id="s-c-crbt-${c.id}">0.00</div></div>
+                                <div class="summary-item" style="border: 1px solid rgba(168, 85, 247, 0.2);"><div class="label">CRBT الشخصي</div><div class="value text-purple-400" id="s-p-crbt-${c.id}">0.00</div></div>
+                            </div>
+                            <div class="summary-grid mt-2">
+                                <div class="summary-item" id="gross-diff-box-${c.id}"><div class="label">فرق إجمالي</div><div class="value" id="s-gross-diff-${c.id}">0.00</div></div>
+                                <div class="summary-item" id="net-diff-box-${c.id}"><div class="label">فرق صافي</div><div class="value" id="s-net-diff-${c.id}">0.00</div></div>
+                                <div class="summary-item"><div class="label">فرق الطلبيات</div><div class="value" id="s-orders-diff-${c.id}">0</div></div>
+                                <div class="summary-item"><div class="label">فرق CRBT</div><div class="value" id="s-crbt-diff-${c.id}">0.00</div></div>
+                            </div>
+                        </div>
+
+                        <div class="codes-result-box">
+                            <div class="flex justify-between items-center mb-2">
+                                <h5 class="font-semibold text-amber-400 text-xs">🔍 مقارنة الأكواد</h5>
+                                <button onclick="compareCodes(${c.id})" class="btn btn-primary text-xs py-1 px-2">🔄 مقارنة</button>
+                            </div>
+                            <div id="codes-result-${c.id}"><div class="text-center text-gray-500 text-xs py-2">اضغط للمقارنة</div></div>
+                        </div>
+
+                        <div class="mt-3 bg-black/20 p-2 rounded-lg">
+                            <h5 class="font-semibold mb-2 text-amber-500 text-xs">📝 أسباب الفرق</h5>
+                            <div class="grid grid-cols-3 gap-2 mb-2">
+                                <input type="text" id="reason-text-${c.id}" placeholder="السبب" class="input-field text-xs">
+                                <input type="number" id="reason-val-${c.id}" placeholder="المبلغ" step="0.01" class="input-field text-xs">
+                                <div class="flex gap-1">
+                                    <button id="src-comp-${c.id}" class="source-btn text-xs" onclick="setSource(${c.id}, 'company')">شركة</button>
+                                    <button id="src-pers-${c.id}" class="source-btn text-xs" onclick="setSource(${c.id}, 'personal')">شخصي</button>
+                                </div>
+                            </div>
+                            <button onclick="addReason(${c.id})" class="btn btn-secondary w-full text-xs mb-2">➕ إضافة</button>
+                            <div id="reasons-list-${c.id}" class="space-y-1 max-h-24 overflow-y-auto text-xs"></div>
+                            <div class="mt-2 pt-2 border-t border-gray-700 flex justify-between text-xs"><span>إجمالي الأسباب:</span><span class="font-bold text-amber-500" id="reasons-total-${c.id}">0.00</span></div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            comparisons.forEach(c => renderReasons(c.id));
+            calcTotals();
+            comparisons.forEach(c => updateCompDisplay(c.id));
+        }
+
+        function updateCodes(id, type, value) { const c = comparisons.find(x => x.id === id); if (!c) return; c[type].codes = value.split(/[\s,;]+/).map(c => c.trim().toUpperCase()).filter(c => c.length > 3); saveToStorage(); }
+        function updateData(id, type, field, value) { const c = comparisons.find(x => x.id === id); if (!c) return; c[type][field] = parseFloat(value) || 0; updateCompDisplay(id); saveToStorage(); }
+        function updateZone(id, type, zone, field, value) { const c = comparisons.find(x => x.id === id); if (!c) return; c[type].zones[zone][field] = parseFloat(value) || 0; updateCompDisplay(id); saveToStorage(); }
+        
+        function updateCompDisplay(id) {
+            const comp = comparisons.find(c => c.id === id); if (!comp) return;
+            const cDed = calcDeduction(comp.company.zones); const pDed = calcDeduction(comp.personal.zones);
+            const cNet = calcNet(comp.company.amount, comp.company.zones); const pNet = calcNet(comp.personal.amount, comp.personal.zones);
+            const cZoneOrders = calcZoneOrders(comp.company.zones); const pZoneOrders = calcZoneOrders(comp.personal.zones);
+            const cRemOrders = calcRemainingOrders(comp.company.orders, comp.company.zones); const pRemOrders = calcRemainingOrders(comp.personal.orders, comp.personal.zones);
+            
+            document.getElementById(`c-ded-${id}`).innerText = cDed.toFixed(2); document.getElementById(`p-ded-${id}`).innerText = pDed.toFixed(2);
+            document.getElementById(`c-zone-ord-${id}`).innerText = cZoneOrders; document.getElementById(`p-zone-ord-${id}`).innerText = pZoneOrders;
+            
+            document.getElementById(`c-sum-amount-${id}`).innerText = comp.company.amount.toFixed(2);
+            document.getElementById(`p-sum-amount-${id}`).innerText = comp.personal.amount.toFixed(2);
+            document.getElementById(`c-sum-crbt-${id}`).innerText = (comp.company.crbt || 0).toFixed(2);
+            document.getElementById(`p-sum-crbt-${id}`).innerText = (comp.personal.crbt || 0).toFixed(2);
+            document.getElementById(`c-sum-orders-${id}`).innerText = comp.company.orders;
+            document.getElementById(`p-sum-orders-${id}`).innerText = comp.personal.orders;
+            document.getElementById(`c-sum-rem-${id}`).innerText = `متبقية: ${cRemOrders}`;
+            document.getElementById(`p-sum-rem-${id}`).innerText = `متبقية: ${pRemOrders}`;
+            document.getElementById(`c-sum-ded-${id}`).innerText = `-${cDed.toFixed(2)}`;
+            document.getElementById(`p-sum-ded-${id}`).innerText = `-${pDed.toFixed(2)}`;
+            document.getElementById(`c-sum-net-${id}`).innerText = cNet.toFixed(2);
+            document.getElementById(`p-sum-net-${id}`).innerText = pNet.toFixed(2);
+            
+            document.getElementById(`s-c-amount-${id}`).innerText = comp.company.amount.toFixed(2);
+            document.getElementById(`s-p-amount-${id}`).innerText = comp.personal.amount.toFixed(2);
+            document.getElementById(`s-c-net-${id}`).innerText = cNet.toFixed(2);
+            document.getElementById(`s-p-net-${id}`).innerText = pNet.toFixed(2);
+            document.getElementById(`s-c-ded-${id}`).innerText = `-${cDed.toFixed(2)} خصم`;
+            document.getElementById(`s-p-ded-${id}`).innerText = `-${pDed.toFixed(2)} خصم`;
+            document.getElementById(`s-c-orders-${id}`).innerText = comp.company.orders;
+            document.getElementById(`s-p-orders-${id}`).innerText = comp.personal.orders;
+            document.getElementById(`s-c-rem-${id}`).innerText = `بعد الخصم: ${cRemOrders}`;
+            document.getElementById(`s-p-rem-${id}`).innerText = `بعد الخصم: ${pRemOrders}`;
+            document.getElementById(`s-c-crbt-${id}`).innerText = (comp.company.crbt || 0).toFixed(2);
+            document.getElementById(`s-p-crbt-${id}`).innerText = (comp.personal.crbt || 0).toFixed(2);
+            
+            const grossDiff = comp.company.amount - comp.personal.amount;
+            const netDiff = cNet - pNet;
+            const ordersDiff = cRemOrders - pRemOrders;
+            const crbtDiff = (comp.company.crbt || 0) - (comp.personal.crbt || 0);
+            
+            document.getElementById(`s-gross-diff-${id}`).innerText = grossDiff.toFixed(2);
+            document.getElementById(`s-gross-diff-${id}`).style.color = grossDiff >= 0 ? 'var(--success)' : 'var(--danger)';
+            document.getElementById(`gross-diff-box-${id}`).style.background = grossDiff >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+            
+            document.getElementById(`s-net-diff-${id}`).innerText = netDiff.toFixed(2);
+            document.getElementById(`s-net-diff-${id}`).style.color = netDiff >= 0 ? 'var(--success)' : 'var(--danger)';
+            document.getElementById(`net-diff-box-${id}`).style.background = netDiff >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+            
+            document.getElementById(`s-orders-diff-${id}`).innerText = ordersDiff;
+            document.getElementById(`s-orders-diff-${id}`).style.color = ordersDiff >= 0 ? 'var(--success)' : 'var(--danger)';
+            document.getElementById(`s-crbt-diff-${id}`).innerText = crbtDiff.toFixed(2);
+            document.getElementById(`s-crbt-diff-${id}`).style.color = crbtDiff >= 0 ? 'var(--success)' : 'var(--danger)';
+            
+            calcTotals();
+        }
+
+        function calcTotals() {
+            let sumC = 0, sumP = 0, sumCN = 0, sumPN = 0, sumCDed = 0, sumPDed = 0, sumCOrders = 0, sumPOrders = 0, sumCCrbt = 0, sumPCrbt = 0;
+            comparisons.forEach(c => { 
+                sumC += c.company.amount || 0; 
+                sumP += c.personal.amount || 0; 
+                const cDed = calcDeduction(c.company.zones); 
+                const pDed = calcDeduction(c.personal.zones); 
+                sumCDed += cDed; 
+                sumPDed += pDed; 
+                sumCN += (c.company.amount || 0) - cDed; 
+                sumPN += (c.personal.amount || 0) - pDed; 
+                sumCOrders += c.company.orders || 0; 
+                sumPOrders += c.personal.orders || 0;
+                sumCCrbt += c.company.crbt || 0;
+                sumPCrbt += c.personal.crbt || 0;
+            });
+            
+            document.getElementById('sumCompany').innerText = sumC.toFixed(2); 
+            document.getElementById('sumPersonal').innerText = sumP.toFixed(2);
+            document.getElementById('sumCompanyOrders').innerText = sumCOrders; 
+            document.getElementById('sumPersonalOrders').innerText = sumPOrders;
+            
+            document.getElementById('sumCompanyNet').innerText = sumCN.toFixed(2);
+            document.getElementById('sumPersonalNet').innerText = sumPN.toFixed(2);
+            
+            document.getElementById('sumGrossDiff').innerText = (sumC - sumP).toFixed(2); 
+            document.getElementById('sumGrossDiff').style.color = (sumC - sumP) >= 0 ? 'var(--success)' : 'var(--danger)';
+            document.getElementById('sumNetDiff').innerText = (sumCN - sumPN).toFixed(2); 
+            document.getElementById('sumNetDiff').style.color = (sumCN - sumPN) >= 0 ? 'var(--success)' : 'var(--danger)';
+            document.getElementById('sumCompanyDed').innerText = `-${sumCDed.toFixed(2)}`; 
+            document.getElementById('sumPersonalDed').innerText = `-${sumPDed.toFixed(2)}`;
+            
+            document.getElementById('sumCompanyCrbt').innerText = sumCCrbt.toFixed(2);
+            document.getElementById('sumPersonalCrbt').innerText = sumPCrbt.toFixed(2);
+        }
+
+        async function extractTextFromAllPages(pdf) { let fullText = ''; for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) { try { const page = await pdf.getPage(pageNum); const content = await page.getTextContent(); fullText += content.items.map(item => item.str).join(' ') + '\n'; } catch (e) {} } return fullText; }
+        
+        function extractLogic(text) {
+            const result = { total: null, orders: null, codes: [] };
+            const normalized = normalizeArabicNumbers(text).replace(/,/g, '.').replace(/\s+/g, ' ').trim();
+            
+            const foundCodes = [];
+            const linePattern = /(?:\s|^)(\d{1,3})\s+([A-Za-z0-9\-]+)/g;
+            let match;
+            while ((match = linePattern.exec(normalized)) !== null) {
+                const token = match[2];
+                if (token && /\d/.test(token) && token.length > 5) foundCodes.push(token.toUpperCase());
+            }
+            result.codes = foundCodes;
+
+            const ordersMatch = normalized.match(/Nb\.\s*commandes?\s*[:\-]?\s*(\d+)/i);
+            if (ordersMatch) result.orders = parseInt(ordersMatch[1]);
+
+            const totalMatch = normalized.match(/Total\s*brut\s*[:\-]?\s*([\d\s.]+)/i);
+            if (totalMatch) result.total = parseNumber(totalMatch[1]);
+
+            return result;
+        }
+
+        async function handleUpload(id, type, input) {
+            const file = input.files[0]; if (!file) return;
+            const statusEl = document.getElementById(`${type}-status-${id}`);
+            statusEl.innerHTML = `<div class="status-box status-loading"><div class="spinner"></div> 🔄 تحليل...</div>`;
+            try {
+                const arrayBuffer = await file.arrayBuffer(); let textContent = ''; let data = { total: null, orders: null, codes: [] };
+                if (file.type === 'application/pdf') {
+                    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                    textContent = await extractTextFromAllPages(pdf);
+                    data = extractLogic(textContent);
+                } else if (file.type.startsWith('image/')) {
+                    const img = new Image(); img.src = URL.createObjectURL(file); await new Promise(resolve => img.onload = resolve);
+                    const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d'); canvas.width = img.width; canvas.height = img.height; ctx.drawImage(img, 0, 0);
+                    const ocrResult = await Tesseract.recognize(canvas, 'ara+fra+eng', { logger: m => { if (m.status === 'recognizing text') statusEl.innerHTML = `<div class="status-box status-loading"><div class="spinner"></div> 🔍 OCR: ${Math.round(m.progress * 100)}%</div>`; } });
+                    textContent = ocrResult.data.text;
+                    data = extractLogic(textContent);
+                }
+                updateExtractionResult(id, type, data);
+            } catch (error) { console.error(error); statusEl.innerHTML = `<div class="status-box" style="color:var(--danger)">⚠️ فشل التحليل</div>`; }
+        }
+
+        function updateExtractionResult(id, type, data) {
+            const comp = comparisons.find(c => c.id === id); if (!comp) return;
+            const prefix = type === 'company' ? 'c' : 'p';
+            
+            comp[type].amount = data.total || 0; comp[type].orders = data.orders || 0; comp[type].codes = data.codes || [];
+            
+            document.getElementById(`${prefix}-amount-${id}`).value = data.total?.toFixed(2) || '';
+            document.getElementById(`${prefix}-orders-${id}`).value = data.orders || '';
+            document.getElementById(`${prefix}-codes-${id}`).value = (data.codes || []).join('\n');
+            
+            const statusEl = document.getElementById(`${type}-status-${id}`);
+            statusEl.innerHTML = `<div class="status-box status-success">✓ مبلغ: ${data.total?.toFixed(2) || '0'} | طلبات: ${data.orders || 0}</div>`;
+            
+            updateCompDisplay(id); saveToStorage(); showToast(`✓ استخراج ${data.codes?.length || 0} كود`, 'success');
+        }
+
+        function compareCodes(id) { const comp = comparisons.find(c => c.id === id); if (!comp) return; const companyCodes = new Set(comp.company.codes || []); const personalCodes = new Set(comp.personal.codes || []); const missingInPersonal = [...companyCodes].filter(c => !personalCodes.has(c)); const missingInCompany = [...personalCodes].filter(c => !companyCodes.has(c)); const matched = [...companyCodes].filter(c => personalCodes.has(c)); const resultEl = document.getElementById(`codes-result-${id}`); if (companyCodes.size === 0 && personalCodes.size === 0) { resultEl.innerHTML = `<div class="text-center text-red-400 text-xs py-2">⚠️ لا توجد أكواد</div>`; return; } resultEl.innerHTML = `<div class="grid grid-cols-1 md:grid-cols-2 gap-2"><div class="bg-sky-500/10 rounded p-2 border border-sky-500/20"><div class="text-sky-400 font-bold text-xs mb-1">🏢 شركة فقط (${missingInPersonal.length})</div><div class="codes-column">${missingInPersonal.length > 0 ? missingInPersonal.map(code => `<span class="code-chip code-missing-in-personal">${escapeHtml(code)}</span>`).join('') : '<div class="text-gray-500 text-xs">✓ كله موجود</div>'}</div></div><div class="bg-purple-500/10 rounded p-2 border border-purple-500/20"><div class="text-purple-400 font-bold text-xs mb-1">👤 شخصي فقط (${missingInCompany.length})</div><div class="codes-column">${missingInCompany.length > 0 ? missingInCompany.map(code => `<span class="code-chip code-missing-in-company">${escapeHtml(code)}</span>`).join('') : '<div class="text-gray-500 text-xs">✓ كله موجود</div>'}</div></div></div><div class="mt-2 flex justify-between items-center"><span class="text-emerald-400 text-xs">✓ متطابقة: ${matched.length}</span><button onclick="copyToClipboard('${id}', 'missingPersonal')" class="btn btn-secondary text-xs py-1 px-2">📋 نسخ المفقودة</button></div>`; comp._missingPersonal = missingInPersonal; comp._missingCompany = missingInCompany; }
+        function copyToClipboard(id, type) { const comp = comparisons.find(c => c.id === id); if (!comp) return; const codes = type === 'missingPersonal' ? comp._missingPersonal : comp._missingCompany; if (!codes || codes.length === 0) { showToast('لا يوجد', 'error'); return; } navigator.clipboard.writeText(codes.join('\n')).then(() => showToast('✓ تم النسخ')); }
+
+        function setSource(id, src) { const c = comparisons.find(x => x.id === id); if (!c) return; c.tempSource = src; document.getElementById(`src-comp-${id}`).className = `source-btn text-xs ${src === 'company' ? 'active-company' : ''}`; document.getElementById(`src-pers-${id}`).className = `source-btn text-xs ${src === 'personal' ? 'active-personal' : ''}`; }
+        function addReason(id) { const t = document.getElementById(`reason-text-${id}`).value.trim(); const v = parseFloat(document.getElementById(`reason-val-${id}`).value) || 0; const c = comparisons.find(x => x.id === id); if (!t || !v || !c.tempSource) { showToast('أكمل البيانات', 'error'); return; } c.reasons.push({ text: t, val: v, source: c.tempSource }); document.getElementById(`reason-text-${id}`).value = ''; document.getElementById(`reason-val-${id}`).value = ''; c.tempSource = null; document.getElementById(`src-comp-${id}`).className = "source-btn text-xs"; document.getElementById(`src-pers-${id}`).className = "source-btn text-xs"; renderReasons(id); saveToStorage(); }
+        function removeReason(id, idx) { const c = comparisons.find(x => x.id === id); c.reasons.splice(idx, 1); renderReasons(id); saveToStorage(); }
+        function renderReasons(id) { const c = comparisons.find(x => x.id === id); const listEl = document.getElementById(`reasons-list-${id}`); const totalEl = document.getElementById(`reasons-total-${id}`); if (!c || !listEl) return; listEl.innerHTML = c.reasons.map((r, i) => `<div class="bg-black/30 p-1 rounded flex justify-between"><div><span class="tag ${r.source === 'company' ? 'tag-company' : 'tag-personal'}">${r.source === 'company' ? '🏢' : '👤'}</span> ${escapeHtml(r.text)}</div><div class="flex gap-1 items-center"><span class="font-bold text-amber-400">${r.val.toFixed(2)}</span><button class="text-red-400 text-xs" onclick="removeReason(${id}, ${i})">×</button></div></div>`).join(''); if (totalEl) totalEl.innerText = c.reasons.reduce((s, r) => s + r.val, 0).toFixed(2); }
+
+        function exportReport() { 
+            let sumC = 0, sumP = 0, sumCN = 0, sumPN = 0, sumCDed = 0, sumPDed = 0, sumCCrbt = 0, sumPCrbt = 0;
+            comparisons.forEach(c => { 
+                sumC += c.company.amount || 0; 
+                sumP += c.personal.amount || 0; 
+                const cDed = calcDeduction(c.company.zones); 
+                const pDed = calcDeduction(c.personal.zones); 
+                sumCDed += cDed; 
+                sumPDed += pDed; 
+                sumCN += (c.company.amount || 0) - cDed; 
+                sumPN += (c.personal.amount || 0) - pDed;
+                sumCCrbt += c.company.crbt || 0;
+                sumPCrbt += c.personal.crbt || 0;
+            });
+            
+            let r = '═══════════════════════════════════════\n';
+            r += '          تقرير الفواتير الشامل\n';
+            r += '═══════════════════════════════════════\n\n';
+            
+            r += '📊 الملخص العام:\n';
+            r += '───────────────────────────────────────\n';
+            r += `🏢 شركة (إجمالي): ${sumC.toFixed(2)}\n`;
+            r += `👤 شخصي (إجمالي): ${sumP.toFixed(2)}\n`;
+            r += `🏢 شركة (صافي): ${sumCN.toFixed(2)}\n`;
+            r += `👤 شخصي (صافي): ${sumPN.toFixed(2)}\n`;
+            r += `فرق إجمالي: ${(sumC - sumP).toFixed(2)}\n`;
+            r += `فرق صافي: ${(sumCN - sumPN).toFixed(2)}\n`;
+            r += `خصم الشركة: -${sumCDed.toFixed(2)}\n`;
+            r += `خصم الشخصي: -${sumPDed.toFixed(2)}\n`;
+            r += `CRBT شركة: ${sumCCrbt.toFixed(2)}\n`;
+            r += `CRBT شخصي: ${sumPCrbt.toFixed(2)}\n`;
+            r += '───────────────────────────────────────\n\n';
+            
+            comparisons.forEach((c, i) => { 
+                const cNet = calcNet(c.company.amount, c.company.zones); 
+                const pNet = calcNet(c.personal.amount, c.personal.zones); 
+                const cRem = calcRemainingOrders(c.company.orders, c.company.zones); 
+                const pRem = calcRemainingOrders(c.personal.orders, c.personal.zones);
+                const cDed = calcDeduction(c.company.zones);
+                const pDed = calcDeduction(c.personal.zones);
+                
+                r += `📋 مقارنة #${i + 1}:\n`;
+                r += '───────────────────────────────────────\n';
+                r += `  🏢 الشركة:\n`;
+                r += `     الإجمالي: ${c.company.amount.toFixed(2)}\n`;
+                r += `     الخصم: -${cDed.toFixed(2)}\n`;
+                r += `     الصافي: ${cNet.toFixed(2)}\n`;
+                r += `     الطلبيات: ${c.company.orders} (${cRem} متبقية)\n`;
+                r += `     CRBT: ${(c.company.crbt || 0).toFixed(2)}\n`;
+                r += `  👤 الشخصي:\n`;
+                r += `     الإجمالي: ${c.personal.amount.toFixed(2)}\n`;
+                r += `     الخصم: -${pDed.toFixed(2)}\n`;
+                r += `     الصافي: ${pNet.toFixed(2)}\n`;
+                r += `     الطلبيات: ${c.personal.orders} (${pRem} متبقية)\n`;
+                r += `     CRBT: ${(c.personal.crbt || 0).toFixed(2)}\n`;
+                r += `  📈 الفروقات:\n`;
+                r += `     فرق إجمالي: ${(c.company.amount - c.personal.amount).toFixed(2)}\n`;
+                r += `     فرق صافي: ${(cNet - pNet).toFixed(2)}\n`;
+                r += `     فرق CRBT: ${((c.company.crbt || 0) - (c.personal.crbt || 0)).toFixed(2)}\n\n`;
+            });
+            
+            const blob = new Blob([r], {type: 'text/plain;charset=utf-8'}); 
+            const a = document.createElement('a'); 
+            a.href = URL.createObjectURL(blob); 
+            a.download = 'تقرير_الفواتير.txt'; 
+            a.click(); 
+            showToast('✓ تم التصدير', 'success'); 
+        }
+
+        // PWA Service Worker & Install Logic
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('SW Registered:', reg))
+                    .catch(err => console.log('SW Failed:', err));
+            });
+        }
+
+        let deferredPrompt;
+        const installBtn = document.getElementById('pwaInstallBtn');
+        
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            installBtn.style.display = 'block';
+        });
+
+        installBtn.addEventListener('click', async () => {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                console.log(`User response: ${outcome}`);
+                deferredPrompt = null;
+                installBtn.style.display = 'none';
+            }
+        });
+
+        window.addEventListener('appinstalled', () => {
+            installBtn.style.display = 'none';
+            showToast('تم تثبيت التطبيق بنجاح!');
+        });
+    </script>
+</body>
+</html>

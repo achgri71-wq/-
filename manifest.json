@@ -1,0 +1,37 @@
+{
+  "name": "نظام مقارنة الفواتير",
+  "short_name": "الفواتير",
+  "description": "نظام ذكي لمقارنة الفواتير وحساب الأقاليم",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0a0e1a",
+  "theme_color": "#0a0e1a",
+  "orientation": "portrait-primary",
+  "scope": "./",
+  "lang": "ar",
+  "dir": "rtl",
+  "categories": ["business", "finance", "productivity"],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "إضافة مقارنة جديدة",
+      "short_name": "مقارنة",
+      "description": "إضافة مقارنة فواتير جديدة",
+      "url": "./index.html?action=new",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
