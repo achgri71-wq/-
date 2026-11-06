@@ -161,11 +161,38 @@
         @supports (padding: max(0px)) {
             body { padding-bottom: max(20px, env(safe-area-inset-bottom)); }
         }
+
+        /* Cloud Sync Button */
+        .cloud-sync-btn {
+            position: fixed;
+            top: 16px;
+            left: 16px;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+            font-size: 1.2rem;
+            cursor: pointer;
+            z-index: 1001;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        .cloud-sync-btn.syncing { animation: spinCloud 1s linear infinite; }
+        .cloud-sync-btn.offline { opacity: 0.5; }
+        @keyframes spinCloud { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
 </head>
 <body class="p-2 md:p-4">
     <div id="toastContainer" class="toast-container"></div>
-    
+
+    <!-- Cloud Sync Button -->
+    <button id="cloudSyncBtn" class="cloud-sync-btn" onclick="forceSync()" title="مزامنة سحابية">
+        <span id="cloudSyncIcon">☁️</span>
+    </button>
+
     <!-- PWA Install Button -->
     <button id="pwaInstallBtn" class="pwa-install-btn">📲 تثبيت التطبيق</button>
 
@@ -271,10 +298,15 @@
         let idCounter = 0;
         const STORAGE_KEY = 'invoice_comparisons_v19_pwa';
         const HISTORY_KEY = 'invoice_history_v19_pwa';
+        const CLOUD_URL = 'https://textdb.dev/api/data/compare-app-e07b45c29ad64f13';
+        let suppressCloudSave = false;
+        let cloudSaveTimer = null;
+        const localDataUpdateTs = () => parseInt(localStorage.getItem('lastDataUpdate')) || 0;
+        const emptySide = () => ({ amount: 0, orders: 0, crbt: 0, zones: defaultZones(), codes: [] });
 
         const defaultZones = () => ({ local: { count: 0, price: 0 }, regional: { count: 0, price: 0 }, south: { count: 0, price: 0 } });
 
-        document.addEventListener('DOMContentLoaded', () => { loadFromStorage(); if (comparisons.length === 0) addComparison(); });
+        document.addEventListener('DOMContentLoaded', () => { loadFromStorage(); if (comparisons.length === 0) addComparison(); setTimeout(() => { forceSync(); }, 800); });
 
         const showToast = (message, type = 'success') => { const c = document.getElementById('toastContainer'); const t = document.createElement('div'); t.className = `toast toast-${type}`; t.textContent = message; c.appendChild(t); setTimeout(() => t.remove(), 3000); };
         const escapeHtml = (text) => { if (!text) return ''; const d = document.createElement('div'); d.textContent = text; return d.innerHTML; };
@@ -286,8 +318,104 @@
         const calcRemainingOrders = (orders, zones) => orders - (zones.local.count + zones.regional.count + zones.south.count);
         const calcZoneOrders = (zones) => zones.local.count + zones.regional.count + zones.south.count;
 
-        function saveToStorage() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(comparisons)); localStorage.setItem('invoice_id_counter', idCounter.toString()); } catch (e) {} }
+        function saveToStorage() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(comparisons)); localStorage.setItem('invoice_id_counter', idCounter.toString()); } catch (e) {} scheduleCloudSave(); }
         function loadFromStorage() { try { const s = localStorage.getItem(STORAGE_KEY); const c = localStorage.getItem('invoice_id_counter'); if (s) { comparisons = JSON.parse(s); comparisons.forEach(x => { x.collapsed = x.collapsed || false; x.company.codes = x.company.codes || []; x.personal.codes = x.personal.codes || []; x.reasons = x.reasons || []; x.company.zones = x.company.zones || defaultZones(); x.personal.zones = x.personal.zones || defaultZones(); }); } if (c) idCounter = parseInt(c) || 0; render(); } catch (e) { addComparison(); } }
+
+        // ── Cloud sync (textdb.dev, same pattern as Facteurelivreure) ──────
+        function localHasData() {
+            return comparisons.some(c =>
+                (c.company.amount || 0) || (c.company.orders || 0) ||
+                (c.personal.amount || 0) || (c.personal.orders || 0) ||
+                (c.company.codes || []).length || (c.personal.codes || []).length);
+        }
+
+        function scheduleCloudSave() {
+            if (suppressCloudSave) return;
+            clearTimeout(cloudSaveTimer);
+            cloudSaveTimer = setTimeout(cloudPush, 2000);
+        }
+
+        async function cloudPush() {
+            if (suppressCloudSave) return;
+            setSyncState('syncing');
+            try {
+                const payload = JSON.stringify({ updatedAt: Date.now(), data: { comparisons: comparisons, idCounter: idCounter } });
+                const res = await fetch(CLOUD_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: payload });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                localStorage.setItem('lastDataUpdate', String(Date.now()));
+                setSyncState('ok');
+                return true;
+            } catch (e) { setSyncState('offline'); return false; }
+        }
+
+        async function cloudPull() {
+            try {
+                const res = await fetch(CLOUD_URL + '?t=' + Date.now(), { cache: 'no-store' });
+                if (!res.ok) return null;
+                const txt = (await res.text()).trim();
+                if (!txt) return null;
+                const parsed = JSON.parse(txt);
+                return parsed && parsed.data ? parsed : null;
+            } catch (e) { return null; }
+        }
+
+        function setSyncState(state) {
+            const btn = document.getElementById('cloudSyncBtn');
+            const icon = document.getElementById('cloudSyncIcon');
+            if (!btn || !icon) return;
+            btn.classList.remove('syncing', 'offline');
+            if (state === 'syncing') { icon.textContent = '☁️'; btn.classList.add('syncing'); }
+            else if (state === 'ok') { icon.textContent = '✅'; }
+            else if (state === 'offline') { icon.textContent = '❌'; btn.classList.add('offline'); }
+        }
+
+        let cloudRemoteTs = 0;
+
+        function applyCloudData(data, updatedAt) {
+            suppressCloudSave = true;
+            try {
+                comparisons = Array.isArray(data.comparisons) ? data.comparisons : [];
+                comparisons.forEach(x => {
+                    x.collapsed = x.collapsed || false;
+                    x.company = x.company || emptySide();
+                    x.personal = x.personal || emptySide();
+                    x.company.codes = x.company.codes || [];
+                    x.personal.codes = x.personal.codes || [];
+                    x.company.zones = x.company.zones || defaultZones();
+                    x.personal.zones = x.personal.zones || defaultZones();
+                    x.reasons = x.reasons || [];
+                });
+                if (comparisons.length === 0) comparisons.push({ id: 1, collapsed: false, company: emptySide(), personal: emptySide(), reasons: [] });
+                idCounter = parseInt(data.idCounter) || Math.max.apply(null, comparisons.map(c => c.id || 1));
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(comparisons));
+                localStorage.setItem('invoice_id_counter', String(idCounter));
+                if (updatedAt) localStorage.setItem('lastDataUpdate', String(updatedAt));
+                cloudRemoteTs = updatedAt || 0;
+                render();
+                calcTotals();
+            } finally { suppressCloudSave = false; }
+        }
+
+        async function forceSync() {
+            setSyncState('syncing');
+            const remote = await cloudPull();
+            if (remote && remote.updatedAt > 0) {
+                if (!localHasData() || remote.updatedAt > localDataUpdateTs() + 5000) {
+                    applyCloudData(remote.data, remote.updatedAt);
+                    if (document.getElementById('toastContainer')) showToast('☁️ تم جلب البيانات من السحابة', 'success');
+                    setSyncState('ok');
+                } else {
+                    await cloudPush();
+                    if (document.getElementById('toastContainer')) showToast('☁️ تم رفع البيانات للسحابة', 'success');
+                }
+            } else if (localHasData()) {
+                const ok = await cloudPush();
+                if (document.getElementById('toastContainer')) showToast(ok ? '☁️ تم الرفع للسحابة' : '❌ ما قدرش يوصل للسحابة', ok ? 'success' : 'error');
+            } else {
+                setSyncState('offline');
+                if (document.getElementById('toastContainer')) showToast('السحابة خاوية وما كاين حتى بيانات محلية', 'error');
+            }
+        }
 
         const openHistoryPanel = () => { document.getElementById('historyPanel').classList.add('open'); document.getElementById('historyTitle').textContent = '📚 السجل المحفوظ'; renderHistoryList(); };
         const closeHistoryPanel = () => { document.getElementById('historyPanel').classList.remove('open'); };
