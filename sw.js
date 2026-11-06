@@ -1,6 +1,6 @@
-const CACHE_NAME = 'invoice-compare-v1';
-const STATIC_CACHE = 'invoice-static-v1';
-const DYNAMIC_CACHE = 'invoice-dynamic-v1';
+const CACHE_NAME = 'invoice-compare-v2';
+const STATIC_CACHE = 'invoice-static-v2';
+const DYNAMIC_CACHE = 'invoice-dynamic-v2';
 
 const STATIC_ASSETS = [
     './',
